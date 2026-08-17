@@ -1,0 +1,232 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL") // Prisma 6 compatible - url is supported
+  extensions = [vector]
+}
+
+model User {
+  id             String          @id @default(uuid())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  imageUrl       String?
+  firstName      String?
+  lastName       String?
+  emailAddress   String          @unique
+  credits        Int             @default(150)
+  plan           String          @default("starter")
+  projects       Project[]
+  backgroundJobs BackgroundJob[]
+}
+
+model Project {
+  id                    String                 @id @default(uuid())
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  name                  String
+  repoUrl               String
+  githubToken           String?
+  deletedAt             DateTime?
+  userId                String
+  monthlyCostLimitUsd   Float?
+  alertThresholdPercent Float                  @default(80)
+  indexedCommitSha      String?
+  indexedBranch         String?
+  indexedAt             DateTime?
+  docs                  Docs?
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  readme                Readme?
+  sourceCodeEmbeddings  SourceCodeEmbeddings[]
+  repoMemories          RepoMemory[]
+  indexingJob           IndexingJob?
+  queryMetrics          QueryMetrics[]
+  backgroundJobs        BackgroundJob[]
+
+  @@index([userId, deletedAt])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model SourceCodeEmbeddings {
+  id               String                 @id @default(uuid())
+  createdAt        DateTime               @default(now())
+  summaryEmbedding Unsupported("vector")?
+  sourceCode       String
+  fileName         String
+  Summary          String
+  projectId        String
+  project          Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([fileName])
+}
+
+model RepoMemory {
+  id              String                 @id @default(uuid())
+  createdAt       DateTime               @default(now())
+  projectId       String
+  project         Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type            String
+  content         String                 @db.Text
+  embedding       Unsupported("vector")?
+  relevanceScore  Float                  @default(1.0)
+  lastRetrievedAt DateTime?
+
+  @@index([projectId])
+  @@index([type])
+}
+
+model Readme {
+  id          String       @id @default(uuid())
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  content     String
+  prompt      String
+  projectId   String       @unique
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  qnaHistory  ReadmeQna[]
+  publicShare ReadmeShare?
+}
+
+model ReadmeQna {
+  id             String   @id @default(uuid())
+  createdAt      DateTime @default(now())
+  question       String
+  answer         String
+  updatedContent String
+  readmeId       String
+  readme         Readme   @relation(fields: [readmeId], references: [id], onDelete: Cascade)
+}
+
+model ReadmeShare {
+  id         String   @id @default(uuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  shareToken String   @unique
+  isActive   Boolean  @default(true)
+  readmeId   String   @unique
+  readme     Readme   @relation(fields: [readmeId], references: [id], onDelete: Cascade)
+}
+
+model Docs {
+  id          String     @id @default(uuid())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  content     String
+  prompt      String
+  projectId   String     @unique
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  qnaHistory  DocsQna[]
+  publicShare DocsShare?
+}
+
+model DocsQna {
+  id             String   @id @default(uuid())
+  createdAt      DateTime @default(now())
+  question       String
+  answer         String
+  updatedContent String
+  docsId         String
+  docs           Docs     @relation(fields: [docsId], references: [id], onDelete: Cascade)
+}
+
+model DocsShare {
+  id         String   @id @default(uuid())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  shareToken String   @unique
+  isActive   Boolean  @default(true)
+  docsId     String   @unique
+  docs       Docs     @relation(fields: [docsId], references: [id], onDelete: Cascade)
+}
+
+model IndexingJob {
+  id             String            @id @default(uuid())
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  projectId      String            @unique
+  project        Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status         IndexingJobStatus @default(queued)
+  progress       Int               @default(0)
+  error          String?           @db.Text
+  lockedAt       DateTime?
+  lockedBy       String?
+  phase          IndexingPhase     @default(fast)
+  filesTotal     Int               @default(0)
+  filesProcessed Int               @default(0)
+  lastCommitSha  String?
+  indexedBranch  String?
+  resumeAfter    String?           @db.Text
+
+  @@index([status, lockedAt])
+  @@index([projectId])
+  @@map("IndexingJob")
+}
+
+enum IndexingJobStatus {
+  queued
+  processing
+  completed
+  failed
+}
+
+enum IndexingPhase {
+  fast
+  full
+}
+
+model BackgroundJob {
+  id          String              @id @default(uuid())
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  completedAt DateTime?
+  userId      String
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String
+  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind        BackgroundJobKind
+  status      BackgroundJobStatus @default(running)
+  error       String?             @db.Text
+
+  @@index([userId, projectId, kind, createdAt(sort: Desc)])
+  @@index([projectId, kind, status])
+}
+
+enum BackgroundJobKind {
+  readme_regen
+  docs_regen
+}
+
+enum BackgroundJobStatus {
+  running
+  completed
+  failed
+}
+
+model QueryMetrics {
+  id                  String   @id @default(uuid())
+  projectId           String
+  project             Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  routeType           String
+  modelUsed           String
+  promptTokens        Int      @default(0)
+  completionTokens    Int      @default(0)
+  totalTokens         Int      @default(0)
+  retrievalCount      Int      @default(0)
+  memoryHitCount      Int      @default(0)
+  latencyMs           Int
+  estimatedCostUsd    Float
+  success             Boolean
+  errorMessage        String?  @db.Text
+  wasColdStart        Boolean  @default(false)
+  cacheHit            Boolean  @default(false)
+  avgMemorySimilarity Float?
+  createdAt           DateTime @default(now())
+
+  @@index([projectId])
+  @@index([projectId, createdAt(sort: Desc)])
+  @@index([projectId, success, createdAt(sort: Desc)])
+}
